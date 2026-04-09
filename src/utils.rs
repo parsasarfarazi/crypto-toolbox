@@ -1,5 +1,3 @@
-use crate::prng;
-
 /// ## Greatest Common Divisor
 /// implements the simple euclidian algorithm to calculate the gcd of two numbers `a` and `b`.
 /// ```

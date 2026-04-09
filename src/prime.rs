@@ -1,5 +1,3 @@
-use std::collections::btree_map::Range;
-
 use crate::{prng, utils};
 pub fn gen_prime() -> u128 {
     //gen a random odd number

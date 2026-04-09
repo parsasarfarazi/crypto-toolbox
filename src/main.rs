@@ -1,6 +1,8 @@
-use crypto_toolbox::prng;
+use crypto_toolbox::bignum::biguint::*;
 
 fn main() {
-    println!("the odd number is {:?}" , prng::odd_new());
-    println!("the random number is {:?}" , prng::new());
+    let mut a = U2048::new();
+    a = a + U2048::from(1_u8);
+
+    println!("result is {:?}",a)
 }
