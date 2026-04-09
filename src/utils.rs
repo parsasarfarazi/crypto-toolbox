@@ -1,346 +1,171 @@
-use crypto_bigint::{self, Integer, U1024, U2048, U16384, Zero};
+use crate::prng;
 
-type Pint = U1024;
-/// Calculates the greatest common divisors of a vector of numbers using the euclidian algorithm
-/// #### Arguments
-/// * `numbers` - A reference to a array of BigUints
-/// #### Returns
-/// * `0` if the input is empty
-/// * the gcd of the numbers
-/// #### Examples
+/// ## Greatest Common Divisor
+/// implements the simple euclidian algorithm to calculate the gcd of two numbers `a` and `b`.
 /// ```
-/// use crypto_toolbox::utils::gcd;
-///
-/// let numbers = vec![12, 18, 24];
-/// assert_eq!(gcd::gcd(&numbers), 6);
-///
-/// let empty: Vec<u32> = vec![];
-/// assert_eq!(gcd::gcd(&empty), 0);
+///     use crypto_toolbox::utils;  
+///     let g = utils::gcd(12,54);
+///     assert_eq!(g,6);
 /// ```
-pub fn gcd(numbers: &[Pint]) -> Pint {
-    if numbers.is_empty() {
-        return Pint::zero();
-    }
-    if numbers.len() == 1 {
-        return numbers[0];
-    }
-    let mut result = numbers[0];
-    for &number in numbers.iter().skip(1) {
-        result = gcd_of_two(result, number);
-        if result == Pint::one() {
-            return Pint::one();
-        }
-    }
-    result
-}
-
-/// Core logic of the GCD Euclidean algorithm for only two numbers
-fn gcd_of_two(r0: Pint, r1: Pint) -> Pint {
-    if r1 == Pint::zero() {
-        r0
+pub fn gcd(a: u128, b: u128) -> u128 {
+    if a == b {
+        return a;
+    } else if a > b {
+        if b == 0 { a } else { gcd_core(a, b) }
     } else {
-        gcd_of_two(r1, r0 % r1)
+        if a == 0 { b } else { gcd_core(b, a) }
     }
 }
 
-/// The extended euclidian algorithm for calculating the gcd in equation: `au + bv = gcd(a,b)`
-/// #### Arguments
-/// * `a` and `b` two i64 integers
-/// #### Returns
-/// * `u`, `v` and `gcd(a,b)`
-/// #### Examples
+fn gcd_core(a: u128, b: u128) -> u128 {
+    if b == 0 {
+        return a;
+    } else {
+        gcd_core(b, a % b)
+    }
+}
+
+/// ## GCD with the multiples of inputs
+/// implements the extended euclidian algorithm to output `(u,v,g)` in equality au + bv = (g)cd.
 /// ```
-/// use crypto_toolbox::utils::gcd;
-///
-/// let (u,v,g) = gcd::extended_gcd(12,16);
-/// assert_eq!(g, 4);
-/// assert_eq!(12*u + 16*v, g); // Verify Bézout's identity
+///     use crypto_toolbox::utils;  
+///     let (u,v,g) = utils::extended_gcd(24,20);
+///     assert_eq!(g,4);
+///     assert_eq!(g as i128 ,24*u + 20*v)
 /// ```
-pub fn extended_gcd(a: i64, b: i64) -> (i64, i64, i64) {
-    let mut u: i64 = 1;
-    let mut g: i64 = a;
-    let mut x: i64 = 0;
-    let mut y: i64 = b;
+pub fn extended_gcd(a: u128, b: u128) -> (i128, i128, u128) {
+    if b == 0 {
+        return (1_i128, 0_i128, a);
+    }
+    if a == 0 {
+        return (0_i128, 1_i128, b);
+    }
+    let a = a as i128;
+    let b = b as i128;
+
+    let mut g = a;
+    let mut y = b;
+    let mut u = 1;
+    let mut x = 0;
 
     loop {
         if y == 0 {
-            let v: i64 = (g - a * u) / b;
-            return (u, v, g);
+            let v = (g - a * u) / b;
+            return (u, v, g as u128);
         }
-        let t: i64 = g % y;
-        let q: i64 = (g - t) / y;
-        let s: i64 = u - q * x;
+        let t = g % y;
+        let q = (g - t) / y;
+        let s = u - q * x;
         u = x;
         g = y;
         x = s;
         y = t;
     }
 }
-/// Computes modular exponentiation (base^exponent mod modulo) using binary exponentiation algorithm.
-///
-/// This function uses the binary expansion of the exponent to efficiently compute
-/// the result with fewer multiplications.
-///
-/// # Arguments
-/// * `base` - The base number
-/// * `exponent` - The exponent to raise the base to
-/// * `modulo` - The modulus for the operation
-///
-/// # Returns
-/// The result of base^exponent mod modulo
-///
-/// # Examples
-/// ```
-/// use crypto_toolbox::utils::arithmatic;
-///
-/// assert_eq!(arithmatic::mod_pow(7, 13, 17), 2);
-/// assert_eq!(arithmatic::mod_pow(4, 13, 497), 445);
-/// ```
-pub fn mod_pow(number: u64, exponent: u64, modulo: u64) -> u64 {
-    let binary_expansion = get_binary_digits(exponent);
-    println!("binary_expansion is : {binary_expansion:?}");
 
-    let mut inter_numbers: Vec<u64> = Vec::new();
-    inter_numbers.push(number % modulo);
-    for i in 1..binary_expansion.len() {
-        inter_numbers.push((inter_numbers[i - 1].pow(2)) % modulo);
-    }
-    println!("inter_numebrs is : {inter_numbers:?}");
-
-    let mut result: u64 = 1;
-    for i in 0..binary_expansion.len() {
-        result *= inter_numbers[i].pow(binary_expansion[i] as u32);
-        result = result % modulo
-    }
-    result
-}
-
-/// Converts a number to its binary representation as a vector of digits.
-///
-/// The resulting vector contains the binary digits in reverse order
-/// (least significant bit first).
-///
-/// # Arguments
-/// * `number` - The number to convert to binary
-///
-/// # Returns
-/// A vector of binary digits (0s and 1s) in reverse order
-///
-/// # Examples
+/// ## Modular Powering
+/// uses Fast powering algorithm to compute the g^a (mod n).
 /// ```
-/// use crypto_toolbox::utils::arithmatic;
-///
-/// assert_eq!(arithmatic::get_binary_digits(13), vec![1, 0, 1, 1]);
-/// assert_eq!(arithmatic::get_binary_digits(8), vec![0, 0, 0, 1]);
+///     use crypto_toolbox::utils;  
+///     let result = utils::mod_pow(100,2,7);
+///     assert_eq!(result,28);
 /// ```
-pub fn get_binary_digits(number: u64) -> Vec<u8> {
-    let mut result = Vec::new();
-    let mut n = number;
+pub fn mod_pow(n: u128, g: u128, a: u128) -> u128 {
     if n == 0 {
-        return vec![0];
+        return 0;
     }
-    while n > 0 {
-        result.push((n % 2) as u8);
-        n /= 2;
+    let mut a = a;
+    let mut x = g;
+    let mut b = 1;
+    while a > 0 {
+        if a % 2 == 1 {
+            b = (b * x) % n;
+        }
+        x = x.pow(2) % n;
+        a = a / 2;
     }
-    result
+    b
 }
-/// Calculates the modular multiplicative inverse using Fermat's Little Theorem.
-///
-/// This method only works when the modulus is a prime number.
-///
-/// # Arguments
-/// * `base` - The number to find the inverse for
-/// * `modulo` - The modulus (must be prime)
-///
-/// # Returns
-/// * `Some(inverse)` - The modular multiplicative inverse if it exists
-/// * `None` - If no inverse exists or if modulo is not prime
-///
-/// # Examples
+
+
+/// ## Modular Inverse
+/// calculates the modular inverse of number
 /// ```
-/// use crypto_toolbox::utils::arithmatic;
-///
-/// // Inverse of 3 modulo 11 (a prime) is 4 because (3 * 4) % 11 = 1
-/// assert_eq!(arithmatic::mod_inv_fermat(3, 11), Some(4));
-///
-/// // No inverse exists for 2 modulo 4 (not coprime)
-/// assert_eq!(arithmatic::mod_inv_fermat(2, 4), None);
+///     use crypto_toolbox::utils;  
+///     let mut result = utils::mod_inv(7,5);
+///     assert_eq!(result,3);
 /// ```
-pub fn mod_inv_fermat(base: u64, modulo: u64) -> Option<u64> {
-    if modulo % base == 0 {
-        return None;
-    }
-    if mod_pow(base, modulo - 1, modulo) == 1 {
-        return Some(mod_pow(base, modulo - 2, modulo));
+pub fn mod_inv(n: u128, g: u128) -> u128 {
+    if gcd(n, g) == 1 {
+        mod_pow(n, g, n - 2)
     } else {
-        return None;
+        0
     }
 }
-/// Calculates the modular multiplicative inverse using the Extended Euclidean Algorithm.
-///
-/// This method works for any modulus (prime or composite) as long as
-/// the base and modulus are coprime (their GCD is 1).
-///
-/// # Arguments
-/// * `base` - The number to find the inverse for
-/// * `modulo` - The modulus
-///
-/// # Returns
-/// * `Some(inverse)` - The modular multiplicative inverse if it exists
-/// * `None` - If no inverse exists (base and modulo are not coprime)
-///
-/// # Examples
-/// ```
-/// use crypto_toolbox::utils::arithmatic;
-///
-/// // Inverse of 3 modulo 11 is 4 because (3 * 4) % 11 = 1
-/// assert_eq!(arithmatic::mod_inv(3, 11), Some(4));
-///
-/// // No inverse exists for 2 modulo 4 (GCD of 2 and 4 is 2, not 1)
-/// assert_eq!(arithmatic::mod_inv(2, 4), None);
-/// ```
-pub fn mod_inv(base: i64, modulo: i64) -> Option<i64> {
-    let (inv, _, gcd) = extended_gcd(base, modulo);
-    if gcd == 1 {
-        Some((inv % modulo + modulo) % modulo)
-    } else {
-        None
-    }
-}
+
 
 #[cfg(test)]
 mod test {
     use super::*;
-    use crypto_bigint::rand_core::OsRng;
-    use crypto_bigint::{self, Limb, NonZero, Random, U1024, U2048, Uint};
-    use rand::prelude::*;
-
-    #[test]
-    fn test_crypto_bigint() {
-        // let n = U2048::random(&mut OsRng);
-        let n = U2048::from_u32(3);
-
-        // let p = NonZero::new(U2048::random(&mut OsRng)).unwrap();
-        let p = NonZero::new(U2048::from_u32(7)).unwrap();
-
-        // let m = n.mul_mod(&U2048::random(&mut OsRng), &p);
-        let m = n.mul_mod(&U2048::from_u32(3), &p);
-
-        println!("n is {n:?} \n and p is {p:?} \n and m is {m:?}");
-    }
 
     #[test]
     fn test_gcd() {
-        let mut numbers: Vec<Pint> = Vec::new();
-        numbers.push(Pint::from_u8(8));
-        numbers.push(Pint::from_u8(4));
+        let mut g = gcd(24, 12);
+        assert_eq!(g, 12);
 
-        let g = gcd(&numbers);
-        dbg!(g);
-        dbg!(numbers);
+        g = gcd(23, 17);
+        assert_eq!(g, 1);
+
+        g = gcd(24, 0);
+        assert_eq!(g, 24);
+
+        g = gcd(0, 0);
+        assert_eq!(g, 0)
     }
 
     #[test]
     fn test_extended_gcd() {
-        let mut rng = rand::rng();
+        let (mut u, mut v, mut g) = extended_gcd(24, 20);
+        assert_eq!(g as i128, 24 * u + 20 * v);
 
-        let a: i64 = rng.random_range(1..1000);
-        let b: i64 = rng.random_range(1..1000);
+        (u, v, g) = extended_gcd(23, 43);
+        assert_eq!(g as i128, 23 * u + 43 * v);
 
-        let (u, v, g) = extended_gcd(a, b);
+        (u, v, g) = extended_gcd(0, 0);
+        assert_eq!(g as i128, 0 * u + 0 * v);
 
-        assert_eq!(a * u + b * v, g);
+        (u, v, g) = extended_gcd(23, 23);
+        assert_eq!(g as i128, 23 * u + 23 * v);
 
-        println!("a={}, b={}, u={}, v={}, g={}", a, b, u, v, g);
-        println!("Verification: {} * {} + {} * {} = {}", a, u, b, v, g);
+        (u, v, g) = extended_gcd(12, 0);
+        assert_eq!(g as i128, 12 * u + 0 * v);
+
+        (u, v, g) = extended_gcd(0, 9);
+        assert_eq!(g as i128, 0 * u + 9 * v);
+
+        (u, v, g) = extended_gcd(4, 26);
+        assert_eq!(g as i128, 4 * u + 26 * v);
     }
+
     #[test]
     fn test_mod_pow() {
-        // Test basic cases
-        assert_eq!(mod_pow(2, 10, 1000), 24);
-        assert_eq!(mod_pow(7, 16, 17), 1);
+        let mut res = mod_pow(1000, 3, 218);
+        assert_eq!(res, 489);
 
-        // Test with very large exponent
-        assert_eq!(mod_pow(2, 100, 1000), 376);
+        res = mod_pow(10, 2, 4);
+        assert_eq!(res, 6);
 
-        // Test edge cases
-        assert_eq!(mod_pow(5, 0, 7), 1); // Any number^0 is 1
-        assert_eq!(mod_pow(0, 5, 7), 0); // 0^anything is 0
-        assert_eq!(mod_pow(5, 5, 1), 0); // Anything mod 1 is 0
+        res = mod_pow(10, 7, 0);
+        assert_eq!(res, 1);
+
+        res = mod_pow(10, 0, 3);
+        assert_eq!(res, 0);
     }
 
-    #[test]
-    fn test_get_binary_digits() {
-        // Test various numbers
-        assert_eq!(get_binary_digits(0), vec![0]);
-        assert_eq!(get_binary_digits(1), vec![1]);
-        assert_eq!(get_binary_digits(2), vec![0, 1]);
-        assert_eq!(get_binary_digits(13), vec![1, 0, 1, 1]);
-        assert_eq!(get_binary_digits(255), vec![1, 1, 1, 1, 1, 1, 1, 1]);
-
-        // Test powers of 2
-        assert_eq!(get_binary_digits(8), vec![0, 0, 0, 1]);
-        assert_eq!(get_binary_digits(16), vec![0, 0, 0, 0, 1]);
-        assert_eq!(get_binary_digits(32), vec![0, 0, 0, 0, 0, 1]);
-    }
-
-    #[test]
-    fn test_mod_inv_fermat() {
-        // Test with prime moduli
-        assert_eq!(mod_inv_fermat(3, 11), Some(4));
-        assert_eq!(mod_inv_fermat(7, 23), Some(10));
-
-        // Test with non-coprime values
-        assert_eq!(mod_inv_fermat(2, 4), None);
-        assert_eq!(mod_inv_fermat(4, 8), None);
-
-        // Test with edge cases
-        assert_eq!(mod_inv_fermat(1, 7), Some(1)); // 1 is its own inverse
-    }
 
     #[test]
     fn test_mod_inv() {
-        // Test with prime moduli
-        assert_eq!(mod_inv(3, 11), Some(4));
-        assert_eq!(mod_inv(7, 23), Some(10));
-
-        // Test with composite moduli (extended Euclidean works with these)
-        assert_eq!(mod_inv(5, 21), Some(17));
-
-        // Test with non-coprime values
-        assert_eq!(mod_inv(2, 4), None);
-        assert_eq!(mod_inv(4, 8), None);
-
-        // Test with negative numbers
-        assert_eq!(mod_inv(-3, 11), Some(7));
-
-        // Test with edge cases
-        assert_eq!(mod_inv(1, 7), Some(1)); // 1 is its own inverse
-    }
-
-    #[test]
-    fn test_inverse_verification() {
-        // Verify that base * inverse ≡ 1 (mod modulo)
-        let base = 5;
-        let modulo = 11;
-
-        if let Some(inv) = mod_inv(base, modulo) {
-            let result = (base * inv) % modulo;
-            assert_eq!(
-                result, 1,
-                "Inverse verification failed: {} * {} ≢ 1 (mod {})",
-                base, inv, modulo
-            );
-        }
-
-        if let Some(inv) = mod_inv_fermat(base as u64, modulo as u64) {
-            let result = (base as u64 * inv) % (modulo as u64);
-            assert_eq!(
-                result, 1,
-                "Fermat inverse verification failed: {} * {} ≢ 1 (mod {})",
-                base, inv, modulo
-            );
-        }
+        let result = mod_inv(7, 5);
+        assert_eq!(result, 3);
     }
 }
