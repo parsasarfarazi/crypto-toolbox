@@ -45,6 +45,7 @@ pub type U2048 = BigUint<32>;
 pub type U4096 = BigUint<64>;
 
 impl<const N: usize> BigUint<N> {
+    pub const MAX: Self = Self { 0: [u64::MAX; N] };
     /// Creates a new Zero instance! equal to defualt().
     pub fn new() -> Self {
         Self::default()
@@ -56,7 +57,7 @@ impl<const N: usize> BigUint<N> {
     }
 
     /// Count the number of Limbs used.
-    pub fn digit_len(&self) -> usize {
+    pub fn limb_count(&self) -> usize {
         for i in (0..N).rev() {
             if self.0[i] != 0 {
                 return i + 1;
@@ -65,45 +66,97 @@ impl<const N: usize> BigUint<N> {
         0
     }
 
-    /// Checked Multipication with u64
-    pub fn checked_mul_small(self, rhs: u64) -> Option<Self> {
+    /// Overflowing Addition
+    pub fn overflowing_add(self, rhs: Self) -> (Self, bool) {
         let mut res = [0u64; N];
-        let mut carry: u128 = 0;
+        let mut carry = false;
 
-        for i in 0..N {
-            let prod = (self.0[i] as u128) * (rhs as u128) + carry;
-            res[i] = prod as u64; // low 64 bits
-            carry = prod >> 64; // high 64 bits → next iteration
+        for i in 0..32 {
+            let (sum1, c1) = self.0[i].overflowing_add(rhs.0[i]);
+            let (sum2, c2) = sum1.overflowing_add(carry as u64);
+
+            res[i] = sum2;
+            carry = c1 | c2;
         }
 
-        // if carry is still non-zero we overflowed 2048 bits
-        if carry != 0 {
-            return None;
-        }
-        Some(BigUint::<N>(res))
+        (BigUint::<N> { 0: res }, carry)
     }
 
-    /// Checked Addition with u64
-    pub fn checked_add_small(self, rhs: u64) -> Option<Self> {
-        let mut res = self.0;
-        let mut carry = rhs as u128;
+    /// Checked Addition
+    pub fn checked_add(self, rhs: Self) -> Option<Self> {
+        let (sum, carry) = self.overflowing_add(rhs);
+        if carry { None } else { Some(sum) }
+    }
+
+    /// Overflowing Sub
+    pub fn overflowing_sub(self, rhs: Self) -> (Self, bool) {
+        let mut res = [0u64; N];
+        let mut bor = false;
 
         for i in 0..N {
-            let sum = res[i] as u128 + carry;
-            res[i] = sum as u64;
-            carry = sum >> 64;
-            if carry == 0 {
-                // no more carry to propagate
-                return Some(BigUint::<N>(res));
+            let (dif1, bor1) = self.0[i].overflowing_sub(rhs.0[i]);
+            let (dif2, bor2) = dif1.overflowing_sub(bor as u64);
+
+            res[i] = dif2;
+            bor = bor1 | bor2;
+        }
+
+        (BigUint { 0: res }, bor)
+    }
+
+    /// Checked Sub
+    pub fn checked_sub(self, rhs: Self) -> Option<Self> {
+        let (dif, bor) = self.overflowing_sub(rhs);
+        if bor { None } else { Some(dif) }
+    }
+
+    /// Overflowing Multipication
+    pub fn overflowing_mul(self, rhs: Self) -> (Self, bool) {
+        let mut res = [0; N];
+        let mut overflow = false;
+
+        for i in 0..N {
+            let mut carry: u128 = 0;
+
+            for j in 0..N {
+                let k = i + j;
+
+                if k >= N {
+                    let a = self.0[i] as u128;
+                    let b = rhs.0[j] as u128;
+                    if a * b + carry != 0 {
+                        overflow = true;
+                    }
+                    continue;
+                }
+
+                let a = self.0[i] as u128;
+                let b = rhs.0[j] as u128;
+                let existing = res[k] as u128;
+
+                let tmp = a * b + existing + carry;
+
+                res[k] = tmp as u64;
+                carry = tmp >> 64;
+            }
+
+            if carry != 0 {
+                overflow = true;
             }
         }
 
-        // carry escaped the top limb → overflow
-        if carry != 0 {
-            None
-        } else {
-            Some(BigUint::<N>(res))
-        }
+        (BigUint::<N> { 0: res }, overflow)
+    }
+
+    /// Checked Multipication
+    pub fn checked_mul(self, rhs: Self) -> Option<Self> {
+        let (result, overflow) = self.overflowing_mul(rhs);
+        if overflow { None } else { Some(result) }
+    }
+
+    /// Division - Remainder
+    pub fn div_rem(self, rhs: Self) -> (Self, Self) {
+        div_rem(self, rhs)
     }
 }
 
@@ -113,30 +166,28 @@ impl<const N: usize> Default for BigUint<N> {
     }
 }
 
-// Math Ops
+// ADD
+
 impl<const N: usize> Add for BigUint<N> {
     type Output = Self;
 
     fn add(self, rhs: Self) -> Self::Output {
-        let mut res = Self::new();
-        let mut carry = false;
-        for i in 0..N {
-            let (sum, carryy) = self.0[i].overflowing_add(rhs.0[i]);
-            if carry {
-                match sum.checked_add(1) {
-                    Some(k) => res.0[i] = k,
-                    None => {
-                        res.0[i] = 0;
-                        carry = true;
-                        continue;
-                    }
-                }
-            } else {
-                res.0[i] = sum;
-            }
-            carry = carryy;
-        }
-        res
+        self.overflowing_add(rhs).0
+    }
+}
+
+impl<const N: usize> Add<u64> for BigUint<N> {
+    type Output = Self;
+
+    fn add(self, rhs: u64) -> Self::Output {
+        self.overflowing_add(BigUint::<N>::from(rhs)).0
+    }
+}
+
+impl<const N: usize> Add<BigUint<N>> for u64 {
+    type Output = BigUint<N>;
+    fn add(self, rhs: BigUint<N>) -> Self::Output {
+        rhs.overflowing_add(BigUint::<N>::from(self)).0
     }
 }
 
@@ -146,32 +197,35 @@ impl<const N: usize> AddAssign for BigUint<N> {
     }
 }
 
+impl<const N: usize> AddAssign<u64> for BigUint<N> {
+    fn add_assign(&mut self, rhs: u64) {
+        *self = *self + rhs;
+    }
+}
+
+// SUB
+
 impl<const N: usize> Sub for BigUint<N> {
     type Output = Self;
 
     fn sub(self, rhs: Self) -> Self::Output {
-        let mut res = Self::new();
-        let mut bor = false;
+        self.overflowing_sub(rhs).0
+    }
+}
 
-        for i in 0..N {
-            let (dif, borr) = self.0[i].overflowing_sub(rhs.0[i]);
+impl<const N: usize> Sub<u64> for BigUint<N> {
+    type Output = Self;
 
-            if bor {
-                match dif.checked_sub(1) {
-                    Some(k) => res.0[i] = k,
-                    None => {
-                        res.0[i] = u64::MAX;
-                        bor = true;
-                        continue;
-                    }
-                }
-            } else {
-                res.0[i] = dif;
-            }
-            bor = borr
-        }
+    fn sub(self, rhs: u64) -> Self::Output {
+        self.overflowing_sub(BigUint::<N>::from(rhs)).0
+    }
+}
 
-        res
+impl<const N: usize> Sub<BigUint<N>> for u64 {
+    type Output = BigUint<N>;
+
+    fn sub(self, rhs: BigUint<N>) -> Self::Output {
+        BigUint::<N>::from(self).overflowing_sub(rhs).0
     }
 }
 
@@ -181,31 +235,35 @@ impl<const N: usize> SubAssign for BigUint<N> {
     }
 }
 
+impl<const N: usize> SubAssign<u64> for BigUint<N> {
+    fn sub_assign(&mut self, rhs: u64) {
+        *self = *self + rhs
+    }
+}
+
+// MUL
+
 impl<const N: usize> Mul for BigUint<N> {
     type Output = Self;
 
     fn mul(self, rhs: Self) -> Self::Output {
-        let mut res = [0; N];
+        self.overflowing_mul(rhs).0
+    }
+}
 
-        for i in 1..N {
-            let mut carry: u128 = 0;
+impl<const N: usize> Mul<u64> for BigUint<N> {
+    type Output = Self;
 
-            for j in 1..(N - i) {
-                let k = j + i;
+    fn mul(self, rhs: u64) -> Self::Output {
+        self.overflowing_mul(BigUint::<N>::from(rhs)).0
+    }
+}
 
-                let a = self.0[i] as u128;
-                let b = rhs.0[j] as u128;
+impl<const N: usize> Mul<BigUint<N>> for u64 {
+    type Output = BigUint<N>;
 
-                let existing = res[k] as u128;
-
-                let tmp = a * b + existing + carry;
-
-                res[k] = tmp as u64;
-                carry = tmp >> 64;
-            }
-        }
-
-        BigUint::<N>(res)
+    fn mul(self, rhs: BigUint<N>) -> Self::Output {
+        BigUint::<N>::from(self).overflowing_mul(rhs).0
     }
 }
 
@@ -215,11 +273,35 @@ impl<const N: usize> MulAssign for BigUint<N> {
     }
 }
 
+impl<const N: usize> MulAssign<u64> for BigUint<N> {
+    fn mul_assign(&mut self, rhs: u64) {
+        *self = *self + rhs
+    }
+}
+
+// DIV
+
 impl<const N: usize> Div for BigUint<N> {
     type Output = Self;
 
     fn div(self, rhs: Self) -> Self::Output {
         div_rem(self, rhs).0
+    }
+}
+
+impl<const N: usize> Div<u64> for BigUint<N> {
+    type Output = Self;
+
+    fn div(self, rhs: u64) -> Self::Output {
+        div_rem(self, BigUint::<N>::from(rhs)).0
+    }
+}
+
+impl<const N: usize> Div<BigUint<N>> for u64 {
+    type Output = BigUint<N>;
+
+    fn div(self, rhs: BigUint<N>) -> Self::Output {
+        div_rem(BigUint::<N>::from(self), rhs).0
     }
 }
 
@@ -229,6 +311,14 @@ impl<const N: usize> DivAssign for BigUint<N> {
     }
 }
 
+impl<const N: usize> DivAssign<u64> for BigUint<N> {
+    fn div_assign(&mut self, rhs: u64) {
+        *self = *self / rhs
+    }
+}
+
+// REM
+
 impl<const N: usize> Rem for BigUint<N> {
     type Output = Self;
 
@@ -237,11 +327,34 @@ impl<const N: usize> Rem for BigUint<N> {
     }
 }
 
+impl<const N: usize> Rem<u64> for BigUint<N> {
+    type Output = Self;
+    fn rem(self, rhs: u64) -> Self::Output {
+        div_rem(self, BigUint::<N>::from(rhs)).1
+    }
+}
+
+impl<const N: usize> Rem<BigUint<N>> for u64 {
+    type Output = BigUint<N>;
+
+    fn rem(self, rhs: BigUint<N>) -> Self::Output {
+        div_rem(BigUint::<N>::from(self), rhs).1
+    }
+}
+
 impl<const N: usize> RemAssign for BigUint<N> {
     fn rem_assign(&mut self, rhs: Self) {
         *self = *self % rhs;
     }
 }
+
+impl<const N: usize> RemAssign<u64> for BigUint<N> {
+    fn rem_assign(&mut self, rhs: u64) {
+        *self = *self / rhs
+    }
+}
+
+// SHIFT
 
 impl<const N: usize> Shl<usize> for BigUint<N> {
     type Output = Self;
@@ -324,6 +437,8 @@ impl<const N: usize> ShrAssign<usize> for BigUint<N> {
     }
 }
 
+// BIT OPS
+
 impl<const N: usize> BitAnd for BigUint<N> {
     type Output = Self;
 
@@ -376,6 +491,7 @@ impl<const N: usize> Not for BigUint<N> {
 }
 
 // Order traits
+
 impl<const N: usize> Ord for BigUint<N> {
     fn cmp(&self, other: &Self) -> Ordering {
         for i in (0..N).rev() {
@@ -395,6 +511,7 @@ impl<const N: usize> PartialOrd for BigUint<N> {
 }
 
 // Format Traits
+
 impl<const N: usize> Display for BigUint<N> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", to_decimal_string(self))
@@ -491,6 +608,7 @@ impl<const N: usize> FromStr for BigUint<N> {
 }
 
 // Convert Traits
+
 impl<const N: usize> From<u8> for BigUint<N> {
     fn from(value: u8) -> Self {
         let mut tmp = [0; N];
@@ -509,6 +627,14 @@ impl<const N: usize> From<u16> for BigUint<N> {
 
 impl<const N: usize> From<u32> for BigUint<N> {
     fn from(value: u32) -> Self {
+        let mut tmp = [0; N];
+        tmp[0] = value as u64;
+        BigUint::<N>(tmp)
+    }
+}
+
+impl<const N: usize> From<i32> for BigUint<N> {
+    fn from(value: i32) -> Self {
         let mut tmp = [0; N];
         tmp[0] = value as u64;
         BigUint::<N>(tmp)
@@ -568,5 +694,215 @@ impl<const N: usize> From<BigUint<N>> for u128 {
 
 #[cfg(test)]
 mod tests {
-    // use super::*;
+    use super::*;
+
+    // tests irrelevent to conversions are done with 2048 bit(N = 32) integers.
+    #[test]
+    fn test_default_new() {
+        let a = U2048::default();
+        let b = U2048::new();
+
+        let zero_arr = [0; 32];
+
+        for i in 1..32 {
+            if a.0[i] != zero_arr[i] && (b.0[i] == a.0[i]) {
+                panic!("default() and new() are not zero in index: {i}")
+            }
+        }
+    }
+
+    #[test]
+    fn test_is_zero() {
+        let zero = U2048 { 0: [0; 32] };
+        assert_eq!(zero.is_zero(), true);
+
+        let not_zero = U2048 { 0: [1; 32] };
+        assert_eq!(not_zero.is_zero(), false);
+
+        let first_part = [0u64; 31];
+        let sec_part = [1u64; 1];
+        let mut combined = [0; 32];
+        combined[..31].copy_from_slice(&first_part);
+        combined[31..].copy_from_slice(&sec_part);
+        let not_zero = U2048 { 0: combined };
+
+        assert_eq!(not_zero.is_zero(), false)
+    }
+
+    #[test]
+    fn test_limb_count() {
+        let num = [
+            0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0,
+        ];
+        assert_eq!(U2048 { 0: num }.limb_count(), 8);
+
+        let num = [
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0,
+        ];
+        assert_eq!(U2048 { 0: num }.limb_count(), 0);
+
+        let num = [
+            1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0,
+        ];
+        assert_eq!(U2048 { 0: num }.limb_count(), 1);
+
+        let num1 = [
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 1,
+        ];
+        assert_eq!(U2048 { 0: num1 }.limb_count(), 32);
+    }
+
+    #[test]
+    fn test_add() {
+        let a = U2048::from(u64::MAX);
+        let b = a + 2;
+
+        assert_eq!(b.0[0], 1);
+        assert_eq!(b.0[1], 1);
+
+        let mut full = U2048::MAX;
+        let overflow_test = full + 1;
+        full += 1;
+
+        assert_eq!(overflow_test, U2048::from(0u64));
+        assert_eq!(full, U2048::new());
+
+        let c = U2048::from_str("0x7823743872938924ffff839").unwrap();
+        let d = U2048::from_str("7823743872938924839").unwrap();
+
+        let e = c + d;
+
+        dbg!(c, d, e);
+        assert_eq!(e, U2048::from_str("2323816408950849785974870880").unwrap());
+
+        let a = U2048::from_str("4397498298439248398493457487348738832983874382").unwrap();
+        let b =
+            U2048::from_str("84398493489384935737948193182172898192819281928928493423").unwrap();
+        let res = a + b;
+
+        assert_eq!(
+            res,
+            U2048::from_str("84398493493782434036387441580666355680168020761912367805").unwrap()
+        );
+    }
+    #[test]
+    fn test_sub() {
+        let a = U2048::from(0u64);
+        let res = a - 1;
+
+        assert_eq!(res, U2048::MAX);
+
+        let b = U2048::from_str("453").unwrap();
+        let c = U2048::from_str("453").unwrap();
+
+        assert_eq!(b - c, U2048::new());
+
+        let a = U2048::from_str("4397498298439248398493457487348738832983874382").unwrap();
+        let b =
+            U2048::from_str("84398493489384935737948193182172898192819281928928493423").unwrap();
+        let res = b - a;
+
+        assert_eq!(
+            res,
+            U2048::from_str("84398493484987437439508944783679440705470543095944619041").unwrap()
+        );
+    }
+
+    #[test]
+    fn test_mul() {
+        let a = U2048::from(2_u64);
+        let b = U2048::from(3_u64);
+        let res = a * b;
+        assert_eq!(res, U2048::from(6_u64));
+
+        let a = U2048::from(10_u64);
+        let res = a * 0;
+
+        assert_eq!(res, U2048::from(0_u64));
+
+        let a = U2048::from_str("4397498298439248398493457487348738832983874382").unwrap();
+        let b =
+            U2048::from_str("84398493489384935737948193182172898192819281928928493423").unwrap();
+        let res = b * a;
+
+        assert_eq!(
+            res,
+            U2048::from_str("371142231510406239074939385092297999096903664249370481200019161205345534114791825654364991324745189586").unwrap()
+        );
+    }
+
+    #[test]
+    fn test_div() {
+        let a = U2048::from(16_u64);
+        let res = a / 4;
+
+        assert_eq!(res, U2048::from(4_u64));
+        let a = U2048::from_str("4397498298439248398493457487348738832983874382").unwrap();
+        let b =
+            U2048::from_str("84398493489384935737948193182172898192819281928928493423").unwrap();
+        let res = b / a;
+
+        assert_eq!(res, U2048::from_str("19192387980").unwrap());
+    }
+
+    #[test]
+    fn test_rem() {
+        let a = U2048::from(9_u64);
+        let res = a % 4;
+
+        assert_eq!(res, U2048::from(1_u64));
+
+        let a = U2048::from_str("4397498298439248398493457487348738832983874382").unwrap();
+        let b =
+            U2048::from_str("84398493489384935737948193182172898192819281928928493423").unwrap();
+        let res = b % a;
+
+        assert_eq!(
+            res,
+            U2048::from_str("4349052014468109593339960946500343706001765063").unwrap()
+        );
+    }
+
+    #[test]
+    fn test_shift() {
+        let a = U2048::from_str("4").unwrap();
+        let res = a << 2;
+
+        assert_eq!(res, U2048::from_str("16").unwrap());
+
+        let a = U2048::from_str("8").unwrap();
+        let res = a >> 2;
+
+        assert_eq!(res, U2048::from_str("2").unwrap());
+    }
+
+    #[test]
+    fn test_bit_ops() {
+        let a = U2048::new();
+        let res = !a;
+
+        assert_eq!(res, U2048::MAX);
+
+        let a = U2048::from_str("0b1001").unwrap();
+        let b = U2048::from_str("0b0110").unwrap();
+
+        let res = a & b;
+        assert_eq!(res, U2048::new());
+
+        let a = U2048::from_str("0b1001").unwrap();
+        let b = U2048::from_str("0b0110").unwrap();
+
+        let res = a | b;
+        assert_eq!(res, U2048::from_str("0b1111").unwrap());
+
+        let a = U2048::from_str("0b1000").unwrap();
+        let b = U2048::from_str("0b1110").unwrap();
+
+        let res = a ^ b;
+        assert_eq!(res, U2048::from_str("0b0110").unwrap());
+    }
 }

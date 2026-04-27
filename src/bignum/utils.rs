@@ -7,8 +7,8 @@ pub fn div_rem<const N: usize>(lhs: BigUint<N>, rhs: BigUint<N>) -> (BigUint<N>,
     let u = &lhs.0;
     let v = &rhs.0;
 
-    let n = rhs.digit_len(); // significant digits of divisor
-    let m_plus_n = lhs.digit_len(); // significant digits of dividend
+    let n = rhs.limb_count(); // significant digits of divisor
+    let m_plus_n = lhs.limb_count(); // significant digits of dividend
 
     // --- trivial cases ---
 
@@ -93,7 +93,7 @@ pub fn div_rem<const N: usize>(lhs: BigUint<N>, rhs: BigUint<N>) -> (BigUint<N>,
         // --- D4. Multiply and subtract ---
         // un[j..j+n] -= q_hat * vn[0..N]
         let mut borrow: i128 = 0;
-        for i in 0..N {
+        for i in 0..n {
             let prod = (q_hat as u128) * (vn[i] as u128);
             // subtract prod + borrow from un[j+i]
             let val = (un[j + i] as i128) - (prod as i128 & 0xFFFF_FFFF_FFFF_FFFF) - borrow;
@@ -110,7 +110,7 @@ pub fn div_rem<const N: usize>(lhs: BigUint<N>, rhs: BigUint<N>) -> (BigUint<N>,
         if val < 0 {
             q[j] -= 1;
             let mut carry: u64 = 0;
-            for i in 0..N {
+            for i in 0..n {
                 let (s1, c1) = un[j + i].overflowing_add(vn[i]);
                 let (s2, c2) = s1.overflowing_add(carry);
                 un[j + i] = s2;
@@ -124,7 +124,7 @@ pub fn div_rem<const N: usize>(lhs: BigUint<N>, rhs: BigUint<N>) -> (BigUint<N>,
     // The remainder lives in un[0..N], shift right by d bits.
     let mut rem = [0u64; N];
     if d > 0 {
-        for i in 0..N - 1 {
+        for i in 0..n - 1 {
             rem[i] = (un[i] >> d) | (un[i + 1] << (64 - d));
         }
         rem[n - 1] = un[n - 1] >> d;
@@ -282,11 +282,11 @@ pub fn parse_decimal<const N: usize>(s: &str) -> Result<BigUint<N>, BigUintParse
         };
 
         acc = acc
-            .checked_mul_small(10)
+            .checked_mul(BigUint::<N>::from(10_u64))
             .ok_or(BigUintParseError::Overflow)?;
 
         acc = acc
-            .checked_add_small(digit)
+            .checked_add(BigUint::<N>::from(digit))
             .ok_or(BigUintParseError::Overflow)?;
     }
 
